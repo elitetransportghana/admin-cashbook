@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elite Transport — Admin Cash Booking</title>
+<link rel="icon" type="image/png" href="https://via.placeholder.com/32x32.png?text=ET">
+<style>
+body { font-family: Arial, sans-serif; background:#f6f7fb; margin:0; padding:20px;}
+h1,h2 { margin:0 0 12px 0; }
+.container { max-width:900px; margin:auto; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05);}
+input, select, button { padding:8px; margin-bottom:12px; border-radius:6px; border:1px solid #ccc; width:100%; box-sizing:border-box;}
+button { background:#0ea5a4; color:white; border:none; cursor:pointer;}
+button.ghost { background:white; border:1px solid #ccc; color:black;}
+.seatmap { display:grid; grid-template-columns:repeat(4,50px); gap:8px; margin-bottom:12px;}
+.seat { width:50px; height:50px; background:#eef2ff; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; user-select:none;}
+.seat.selected { background:#06b6d4; color:white;}
+.seat.taken { background:#111827; color:white; cursor:not-allowed; opacity:0.7;}
+.aisle { width:20px;}
+.summary { background:#fbfdff; padding:12px; border-radius:8px; border:1px solid #eef2ff; margin-top:12px;}
+table { width:100%; border-collapse: collapse; margin-top:20px; }
+table, th, td { border:1px solid #ccc; }
+th, td { padding:8px; text-align:left; }
+th { background:#0ea5a4; color:white; }
+</style>
+<script type="module">
+// ===== PASSWORD PROMPT =====
+const adminPassword = "EliteAdmin123";
+if (sessionStorage.getItem("adminAccess") !== "granted") {
+    let input = prompt("Enter admin password to access this page:");
+    if (input === adminPassword) {
+        sessionStorage.setItem("adminAccess", "granted");
+    } else {
+        alert("Incorrect password. Access denied.");
+        document.body.innerHTML = "<h2 style='text-align:center;margin-top:50px;'>Access Denied</h2>";
+        throw new Error("Access denied due to incorrect password");
+    }
+}
+
+// ===== FIREBASE SETUP =====
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, collection, addDoc, Timestamp, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAemck6mdMNW_sripWUzM8WQjjrmLf69pQ",
+  authDomain: "elite-travels.firebaseapp.com",
+  projectId: "elite-travels",
+  storageBucket: "elite-travels.firebasestorage.app",
+  messagingSenderId: "501436168620",
+  appId: "1:501436168620:web:f62aa5f9e8e6a4310a2209",
+  measurementId: "G-26GGV75HV9"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ===== ADMIN CASH BOOKING =====
+const ROUTE_PRICES = { "Accra": 245, "Kumasi": 143, "Sunyani": 143 };
+const seats = {};
+const selected = new Set();
+const preBooked = { "Accra": [], "Kumasi": [], "Sunyani": [] };
+
+const seatmapEl = document.getElementById("seatmap");
+const selectedCountEl = document.getElementById("selectedCount");
+const totalEl = document.getElementById("total");
+const bookingsTableBody = document.getElementById("bookingsTableBody");
+
+// Build seat map
+function buildSeats(){
+  seatmapEl.innerHTML = "";
+  for(let i=1;i<=49;i++){
+    seats[i] = seats[i] || {status:"free"};
+    const div = document.createElement("div");
+    div.className="seat";
+    div.dataset.id=i;
+    div.textContent=i;
+    div.addEventListener("click", ()=> {
+      if(seats[i].status==="taken") return;
+      if(seats[i].status==="selected"){ seats[i].status="free"; selected.delete(i); }
+      else { seats[i].status="selected"; selected.add(i); }
+      refreshSeats(); updateSummary();
+    });
+    seatmapEl.appendChild(div);
+    if(i%3===0 && i<49){ const aisle = document.createElement("div"); aisle.className='aisle'; seatmapEl.appendChild(aisle); }
+  }
+}
+
+// Refresh seat availability
+async function refreshSeats(){
+  const route = document.getElementById("route").value;
+  const date = document.getElementById("date").value;
+  let booked = preBooked[route] || [];
+  const docId = `${route}_${date}`;
+  const docRef = doc(db,"bookings",docId);
+  const docSnap = await getDoc(docRef);
+  if(docSnap.exists()){ booked = booked.concat(docSnap.data().seats || []); }
+  document.querySelectorAll(".seat").forEach(el=>{
+    const id = parseInt(el.dataset.id);
+    el.classList.remove("selected","taken");
+    if(selected.has(id)) el.classList.add("selected");
+    if(booked.includes(id)) el.classList.add("taken");
+  });
+}
+
+// Update summary
+function updateSummary(){
+  const route = document.getElementById("route").value;
+  const price = ROUTE_PRICES[route];
+  selectedCountEl.textContent = selected.size;
+  totalEl.textContent = (selected.size*price).toFixed(2);
+}
+
+// Record cash booking
+document.getElementById("recordCash").addEventListener("click", async () => {
+  const name = document.getElementById("fullname").value.trim();
+  const phone = document.getElementById("phone").value.trim();
+  const date = document.getElementById("date").value;
+  const route = document.getElementById("route").value;
+  const seatsArr = Array.from(selected);
+
+  if(!name || !phone){ alert("Enter name and phone"); return; }
+  if(seatsArr.length===0){ alert("Select at least one seat"); return; }
+
+  // Lock seats
+  const docId = `${route}_${date}`;
+  const docRef = doc(db,"bookings",docId);
+  const docSnap = await getDoc(docRef);
+  let currentSeats = docSnap.exists() ? docSnap.data().seats : [];
+  const updatedSeats = [...new Set([...currentSeats, ...seatsArr])];
+  await setDoc(docRef, { seats: updatedSeats });
+
+  // Save booking
+  const bookingsCol = collection(db,"passengerBookings");
+  await addDoc(bookingsCol,{
+    name, phone, route, date, seats: seatsArr, timestamp: Timestamp.now(),
+    paidMethod: "cash"
+  });
+
+  alert("Cash booking recorded successfully!");
+  selected.clear();
+  refreshSeats();
+  updateSummary();
+  loadBookings(); // reload table
+});
+
+// Load all bookings
+async function loadBookings(){
+  bookingsTableBody.innerHTML = "";
+  const q = query(collection(db,"passengerBookings"), orderBy("timestamp","desc"));
+  const snapshot = await getDocs(q);
+  snapshot.forEach(doc => {
+    const b = doc.data();
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${b.name}</td>
+      <td>${b.phone}</td>
+      <td>${b.route}</td>
+      <td>${b.date}</td>
+      <td>${b.seats.join(", ")}</td>
+      <td>${b.paidMethod}</td>
+      <td>${new Date(b.timestamp.seconds*1000).toLocaleString()}</td>
+    `;
+    bookingsTableBody.appendChild(row);
+  });
+}
+
+// Event listeners
+document.getElementById("route").addEventListener("change", ()=>{ selected.clear(); refreshSeats(); updateSummary(); });
+document.getElementById("date").addEventListener("change", ()=>{ selected.clear(); refreshSeats(); updateSummary(); });
+
+// Initialize
+buildSeats(); refreshSeats(); updateSummary();
+loadBookings();
+</script>
+</head>
+<body>
+<div class="container">
+  <h1>Elite Transport — Admin Cash Booking</h1>
+  <h2>Passenger Details</h2>
+  <input type="text" id="fullname" placeholder="Full Name">
+  <input type="text" id="phone" placeholder="Phone Number">
+  <label>Travel Date</label>
+  <select id="date">
+    <option value="2025-12-20">20th December</option>
+    <option value="2025-12-21">21st December</option>
+  </select>
+  <p>Boarding Location: <strong>UDS Campus</strong></p>
+  <label>Route</label>
+  <select id="route">
+    <option value="Accra">Accra — ₵245</option>
+    <option value="Kumasi">Kumasi — ₵143</option>
+    <option value="Sunyani">Sunyani — ₵143</option>
+  </select>
+
+  <h2>Select Seats (1–49)</h2>
+  <div id="seatmap" class="seatmap"></div>
+
+  <div class="summary">
+    <p>Seats Selected: <span id="selectedCount">0</span></p>
+    <p>Total: ₵<span id="total">0</span></p>
+  </div>
+
+  <button id="recordCash">Record Cash Booking</button>
+
+  <h2>All Bookings</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Phone</th>
+        <th>Route</th>
+        <th>Date</th>
+        <th>Seats</th>
+        <th>Payment</th>
+        <th>Timestamp</th>
+      </tr>
+    </thead>
+    <tbody id="bookingsTableBody"></tbody>
+  </table>
+</div>
+</body>
+</html>
