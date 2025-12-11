@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Elite Transport — Admin Cash Booking</title>
-<link rel="icon" type="image/png" href="https://via.placeholder.com/32x32.png?text=ET">
+<link rel="icon" type="image/png" href="https://i.ibb.co/Kty8MqP/ELITE-TRANSPORT.png">
+
 <style>
 body { font-family: Arial, sans-serif; background:#f6f7fb; margin:0; padding:20px;}
 h1,h2 { margin:0 0 12px 0; }
-.container { max-width:900px; margin:auto; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05);}
+.container { max-width:1000px; margin:auto; background:white; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05);}
 input, select, button { padding:8px; margin-bottom:12px; border-radius:6px; border:1px solid #ccc; width:100%; box-sizing:border-box;}
 button { background:#0ea5a4; color:white; border:none; cursor:pointer;}
 button.ghost { background:white; border:1px solid #ccc; color:black;}
@@ -22,9 +23,11 @@ table { width:100%; border-collapse: collapse; margin-top:20px; }
 table, th, td { border:1px solid #ccc; }
 th, td { padding:8px; text-align:left; }
 th { background:#0ea5a4; color:white; }
+.filters-container { display:flex; flex-direction:column; gap:10px; margin-bottom:15px; }
 </style>
+
 <script type="module">
-// ===== PASSWORD PROMPT =====
+// ===== PASSWORD PROTECT =====
 const adminPassword = "EliteAdmin123";
 if (sessionStorage.getItem("adminAccess") !== "granted") {
     let input = prompt("Enter admin password to access this page:");
@@ -33,13 +36,14 @@ if (sessionStorage.getItem("adminAccess") !== "granted") {
     } else {
         alert("Incorrect password. Access denied.");
         document.body.innerHTML = "<h2 style='text-align:center;margin-top:50px;'>Access Denied</h2>";
-        throw new Error("Access denied due to incorrect password");
+        throw new Error("Access Denied");
     }
 }
 
 // ===== FIREBASE SETUP =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, collection, addDoc, Timestamp, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, collection, addDoc, Timestamp, getDocs, query, orderBy } 
+from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAemck6mdMNW_sripWUzM8WQjjrmLf69pQ",
@@ -50,14 +54,22 @@ const firebaseConfig = {
   appId: "1:501436168620:web:f62aa5f9e8e6a4310a2209",
   measurementId: "G-26GGV75HV9"
 };
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// ===== ADMIN CASH BOOKING =====
-const ROUTE_PRICES = { "Accra": 245, "Kumasi": 143, "Sunyani": 143 };
+// ===== NEW ROUTES =====
+const ROUTE_PRICES = { 
+    "Accra": 245, 
+    "Kumasi": 143, 
+    "Sunyani": 143, 
+    "Takoradi": 260 
+};
+
+// ===== SEAT SYSTEM =====
 const seats = {};
 const selected = new Set();
-const preBooked = { "Accra": [], "Kumasi": [], "Sunyani": [] };
+const preBooked = { Accra: [], Kumasi: [], Sunyani: [], Takoradi: [] };
 
 const seatmapEl = document.getElementById("seatmap");
 const selectedCountEl = document.getElementById("selectedCount");
@@ -73,26 +85,35 @@ function buildSeats(){
     div.className="seat";
     div.dataset.id=i;
     div.textContent=i;
+
     div.addEventListener("click", ()=> {
       if(seats[i].status==="taken") return;
       if(seats[i].status==="selected"){ seats[i].status="free"; selected.delete(i); }
       else { seats[i].status="selected"; selected.add(i); }
       refreshSeats(); updateSummary();
     });
+
     seatmapEl.appendChild(div);
-    if(i%3===0 && i<49){ const aisle = document.createElement("div"); aisle.className='aisle'; seatmapEl.appendChild(aisle); }
+    if(i%3===0 && i<49){ 
+      const aisle = document.createElement("div");
+      aisle.className='aisle';
+      seatmapEl.appendChild(aisle);
+    }
   }
 }
 
-// Refresh seat availability
+// Refresh seats
 async function refreshSeats(){
   const route = document.getElementById("route").value;
   const date = document.getElementById("date").value;
   let booked = preBooked[route] || [];
+
   const docId = `${route}_${date}`;
-  const docRef = doc(db,"bookings",docId);
+  const docRef = doc(db, "bookings", docId);
   const docSnap = await getDoc(docRef);
-  if(docSnap.exists()){ booked = booked.concat(docSnap.data().seats || []); }
+
+  if (docSnap.exists()) booked = booked.concat(docSnap.data().seats || []);
+
   document.querySelectorAll(".seat").forEach(el=>{
     const id = parseInt(el.dataset.id);
     el.classList.remove("selected","taken");
@@ -101,15 +122,15 @@ async function refreshSeats(){
   });
 }
 
-// Update summary
+// Summary
 function updateSummary(){
   const route = document.getElementById("route").value;
   const price = ROUTE_PRICES[route];
   selectedCountEl.textContent = selected.size;
-  totalEl.textContent = (selected.size*price).toFixed(2);
+  totalEl.textContent = (selected.size * price).toFixed(2);
 }
 
-// Record cash booking
+// Save cash booking
 document.getElementById("recordCash").addEventListener("click", async () => {
   const name = document.getElementById("fullname").value.trim();
   const phone = document.getElementById("phone").value.trim();
@@ -120,15 +141,15 @@ document.getElementById("recordCash").addEventListener("click", async () => {
   if(!name || !phone){ alert("Enter name and phone"); return; }
   if(seatsArr.length===0){ alert("Select at least one seat"); return; }
 
-  // Lock seats
   const docId = `${route}_${date}`;
   const docRef = doc(db,"bookings",docId);
   const docSnap = await getDoc(docRef);
+
   let currentSeats = docSnap.exists() ? docSnap.data().seats : [];
   const updatedSeats = [...new Set([...currentSeats, ...seatsArr])];
+
   await setDoc(docRef, { seats: updatedSeats });
 
-  // Save booking
   const bookingsCol = collection(db,"passengerBookings");
   await addDoc(bookingsCol,{
     name, phone, route, date, seats: seatsArr, timestamp: Timestamp.now(),
@@ -139,56 +160,120 @@ document.getElementById("recordCash").addEventListener("click", async () => {
   selected.clear();
   refreshSeats();
   updateSummary();
-  loadBookings(); // reload table
+  loadBookings();
 });
 
-// Load all bookings
-async function loadBookings(){
+// ===== FILTER SYSTEM =====
+let allBookings = [];
+
+async function loadBookings() {
   bookingsTableBody.innerHTML = "";
+  allBookings = [];
+
   const q = query(collection(db,"passengerBookings"), orderBy("timestamp","desc"));
   const snapshot = await getDocs(q);
-  snapshot.forEach(doc => {
-    const b = doc.data();
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${b.name}</td>
-      <td>${b.phone}</td>
-      <td>${b.route}</td>
-      <td>${b.date}</td>
-      <td>${b.seats.join(", ")}</td>
-      <td>${b.paidMethod}</td>
-      <td>${new Date(b.timestamp.seconds*1000).toLocaleString()}</td>
-    `;
-    bookingsTableBody.appendChild(row);
-  });
+
+  snapshot.forEach(docSnap => allBookings.push(docSnap.data()));
+
+  applyFilters();
 }
 
-// Event listeners
-document.getElementById("route").addEventListener("change", ()=>{ selected.clear(); refreshSeats(); updateSummary(); });
-document.getElementById("date").addEventListener("change", ()=>{ selected.clear(); refreshSeats(); updateSummary(); });
+function applyFilters() {
+  const routeFilter = document.getElementById("filterRoute").value;
+  const dateFilter = document.getElementById("filterDate").value;
+  const search = document.getElementById("searchBar").value.toLowerCase();
 
-// Initialize
+  bookingsTableBody.innerHTML = "";
+
+  allBookings
+    .filter(b =>
+      (routeFilter === "" || b.route === routeFilter) &&
+      (dateFilter === "" || b.date === dateFilter) &&
+      (
+        b.name.toLowerCase().includes(search) ||
+        b.phone.includes(search)
+      )
+    )
+    .forEach(b => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${b.name}</td>
+        <td>${b.phone}</td>
+        <td>${b.route}</td>
+        <td>${b.date}</td>
+        <td>${b.seats.join(", ")}</td>
+        <td>${b.paidMethod}</td>
+        <td>${new Date(b.timestamp.seconds*1000).toLocaleString()}</td>
+      `;
+      bookingsTableBody.appendChild(row);
+    });
+}
+
+document.getElementById("filterRoute").addEventListener("change", applyFilters);
+document.getElementById("filterDate").addEventListener("change", applyFilters);
+document.getElementById("searchBar").addEventListener("input", applyFilters);
+
+// ===== EXPORT FILTERED TABLE TO CSV =====
+function exportTableToCSV() {
+  const rows = document.querySelectorAll("#bookingsTableBody tr");
+
+  if (rows.length === 0) {
+    alert("No data to export!");
+    return;
+  }
+
+  let csv = "Name,Phone,Route,Date,Seats,Payment,Timestamp\n";
+
+  rows.forEach(row => {
+    const cols = row.querySelectorAll("td");
+    const line = Array.from(cols).map(td => `"${td.textContent}"`).join(",");
+    csv += line + "\n";
+  });
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "elite_bookings_export.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+document.getElementById("exportCSV").addEventListener("click", exportTableToCSV);
+
+
+// INIT
 buildSeats(); refreshSeats(); updateSummary();
 loadBookings();
+
 </script>
 </head>
+
 <body>
 <div class="container">
   <h1>Elite Transport — Admin Cash Booking</h1>
+
   <h2>Passenger Details</h2>
+
   <input type="text" id="fullname" placeholder="Full Name">
   <input type="text" id="phone" placeholder="Phone Number">
+
   <label>Travel Date</label>
   <select id="date">
     <option value="2025-12-20">20th December</option>
     <option value="2025-12-21">21st December</option>
   </select>
+
   <p>Boarding Location: <strong>UDS Campus</strong></p>
+
   <label>Route</label>
   <select id="route">
-    <option value="Accra">Accra — ₵245</option>
-    <option value="Kumasi">Kumasi — ₵143</option>
-    <option value="Sunyani">Sunyani — ₵143</option>
+    <option value="Accra">Accra — ₵240</option>
+    <option value="Kumasi">Kumasi — ₵140</option>
+    <option value="Sunyani">Sunyani — ₵140</option>
+    <option value="Takoradi">Takoradi — ₵240</option>
   </select>
 
   <h2>Select Seats (1–49)</h2>
@@ -202,6 +287,28 @@ loadBookings();
   <button id="recordCash">Record Cash Booking</button>
 
   <h2>All Bookings</h2>
+
+  <!-- FILTERS -->
+  <div class="filters-container">
+    <select id="filterRoute">
+      <option value="">Filter by Route (All)</option>
+      <option value="Accra">Accra</option>
+      <option value="Kumasi">Kumasi</option>
+      <option value="Sunyani">Sunyani</option>
+      <option value="Takoradi">Takoradi</option>
+    </select>
+
+    <select id="filterDate">
+      <option value="">Filter by Date (All)</option>
+      <option value="2025-12-20">20th December</option>
+      <option value="2025-12-21">21st December</option>
+    </select>
+
+    <input type="text" id="searchBar" placeholder="Search by name or phone...">
+  </div>
+
+  <button id="exportCSV" class="ghost">Export CSV</button>
+
   <table>
     <thead>
       <tr>
@@ -216,6 +323,7 @@ loadBookings();
     </thead>
     <tbody id="bookingsTableBody"></tbody>
   </table>
+
 </div>
 </body>
 </html>
